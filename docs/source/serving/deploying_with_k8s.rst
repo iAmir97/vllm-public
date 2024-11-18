@@ -51,7 +51,7 @@ Secret is optional and only required for accessing gated models, you can skip th
     token: "REPLACE_WITH_TOKEN"
 
 
-Create a deployment file for vLLM to run the model server. The following example deploys the `Mistral-7B-Instruct-v0.3` model:
+Create a deployment file for vLLM to run the model server. The following example deploys the `Mistral-7B-Instruct-v0.3` model in case of using NVIDIA GPU:
 
 .. code-block:: yaml
 
@@ -100,11 +100,83 @@ Create a deployment file for vLLM to run the model server. The following example
             limits:
               cpu: "10"
               memory: 20G
-              nvidia.com/gpu: "1"
+              nvidia.com/gpu: "1" 
             requests:
               cpu: "2"
               memory: 6G
-              nvidia.com/gpu: "1"
+              nvidia.com/gpu: "1" 
+          volumeMounts:
+          - mountPath: /root/.cache/huggingface
+            name: cache-volume
+          - name: shm
+            mountPath: /dev/shm
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 5
+
+In case of using ROCm GPU:
+
+.. code-block:: yaml
+
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: mistral-7b
+    namespace: default
+    labels:
+      app: mistral-7b
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: mistral-7b
+    template:
+      metadata:
+        labels:
+          app: mistral-7b
+      spec:
+        volumes:
+        - name: cache-volume
+          persistentVolumeClaim:
+            claimName: mistral-7b
+        # vLLM needs to access the host's shared memory for tensor parallel inference.
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: "2Gi"
+        containers:
+        - name: mistral-7b
+          image: vllm/vllm-openai:latest
+          command: ["/bin/sh", "-c"]
+          args: [
+            "vllm serve mistralai/Mistral-7B-Instruct-v0.3 --trust-remote-code --enable-chunked-prefill --max_num_batched_tokens 1024"
+          ]
+          env:
+          - name: HUGGING_FACE_HUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: hf-token-secret
+                key: token
+          ports:
+          - containerPort: 8000
+          resources:
+            limits:
+              cpu: "10"
+              memory: 20G
+              amd.com/gpu: "1" 
+            requests:
+              cpu: "2"
+              memory: 6G
+              amd.com/gpu: "1" 
           volumeMounts:
           - mountPath: /root/.cache/huggingface
             name: cache-volume
